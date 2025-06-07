@@ -1,6 +1,14 @@
 # Teacher Agent Generator
 
-## Overview
+This project provides tools for generating two types of AI agents:
+1.  **Teacher Agents:** Simulate teacher responses to various educational tasks (see [Teacher Agent Details](#teacher-agent-details) below).
+2.  **Translator MTPE Agents:** Simulate translator behavior for Machine Translation Post-Editing (MTPE) tasks (see [Translator MTPE Agent](#translator-mtpe-agent) below).
+
+---
+
+## Teacher Agent Details
+
+### Overview
 
 The Teacher Agent Generator is a Python-based tool designed to create simulated teacher "agents" by generating responses to a series of predefined tasks (questions and questionnaire items) from various Language Learning Models (LLMs). Each agent is based on a persona defined in a CSV file, allowing for diverse and character-rich interactions. This tool can be used for educational research, developing AI-driven teaching simulations, or exploring LLM capabilities in persona adoption and response generation.
 
@@ -20,18 +28,21 @@ The Teacher Agent Generator is a Python-based tool designed to create simulated 
 ```
 teacher_agent_generator/
 ├── data/                     # Input data files
-│   ├── personas.csv          # CSV file defining teacher personas
-│   ├── questions.txt         # Text file for open-ended questions
-│   └── questionnaire.json    # JSON file for questionnaire items
+│   ├── personas.csv          # CSV for defining teacher personas
+│   ├── questions.txt         # Text file for teacher open-ended questions
+│   ├── questionnaire.json    # JSON for teacher questionnaire items
+│   ├── personas_translator.csv # CSV for defining translator personas
+│   └── mtpe_tasks.jsonl      # JSONL file for MTPE tasks
 ├── outputs/                  # Output directory
-│   ├── generated_agents/     # Directory for JSONL output files from main_generator.py
+│   ├── generated_agents/     # Default directory for JSONL output files
 │   └── generation.log        # Log file for script operations
 ├── scripts/                  # Python scripts
 │   ├── config.py             # Project configuration (API keys, paths, LLM defaults)
-│   ├── persona_loader.py     # Loads and validates personas from personas.csv
-│   ├── task_loader.py        # Loads tasks from questions.txt and questionnaire.json
+│   ├── persona_loader.py     # Loads teacher and translator personas
+│   ├── task_loader.py        # Loads teacher and MTPE tasks
 │   ├── llm_interface.py      # Interface for communicating with various LLMs
-│   └── main_generator.py     # Main script to orchestrate the generation process
+│   ├── main_generator.py     # Main script for Teacher Agent generation
+│   └── main_translator_mtpe.py # Main script for Translator MTPE Agent generation
 ├── .env_example              # Example environment file for API keys
 └── README.md                 # This file
 ```
@@ -261,9 +272,121 @@ The script generates a JSONL (JSON Lines) file in the directory specified by `--
 ## Refinement and Prompt Engineering
 
 The quality of the generated teacher agent responses heavily depends on:
-1.  **Persona Detail:** Richer, more specific personas lead to more nuanced agent behavior. Leverage the **optional persona columns** (like `tone_keywords`, `communication_style`, etc.) in `personas.csv` to provide deep contextual information.
+1.  **Persona Detail:** Richer, more specific personas lead to more nuanced agent behavior. Leverage the **optional persona columns** (like `tone_keywords`, `communication_style`, etc.) in `data/personas.csv` to provide deep contextual information.
 2.  **Task Wording:** Clear and unambiguous questions/tasks yield better responses.
-3.  **System Prompt Construction:** The `construct_system_prompt()` function in `main_generator.py` dynamically incorporates both required and optional persona attributes. Experiment with different ways to phrase the content within your `personas.csv` (especially the optional fields and `teaching_plan`) to guide the LLM's responses more effectively.
+3.  **System Prompt Construction:** The `construct_system_prompt()` function in `scripts/main_generator.py` dynamically incorporates both required and optional persona attributes. Experiment with different ways to phrase the content within your `personas.csv` (especially the optional fields and `teaching_plan`) to guide the LLM's responses more effectively.
 4.  **LLM Choice & Parameters:** Different models and temperature settings will produce varied results. Test and iterate.
 
 It's recommended to start with a small set of personas and tasks, analyze the output, refine your prompts and persona details (including the new optional fields), and then scale up.
+
+---
+
+## Translator MTPE Agent
+
+### Overview
+
+This part of the project focuses on simulating translator agents performing Machine Translation Post-Editing (MTPE) tasks. It uses translator-specific personas and MTPE task definitions to generate post-edited text along with a "Think Aloud Protocol" (TAP) and other metadata, providing insights into the simulated editing process. The output is a structured JSON object, making it suitable for analysis.
+
+### Persona Data (`data/personas_translator.csv`)
+
+A CSV file defining translator personas. Each row represents one translator.
+
+*   **Required Columns:**
+    *   `persona_id` (String): Unique identifier for the persona (e.g., "P001").
+    *   `persona_name` (String): Full name of the translator (e.g., "Zhang Wei").
+    *   `native_language` (String): Translator's native language (e.g., "Chinese", "English (US)").
+    *   `education_level` (String): Highest education level achieved (e.g., "Master's Degree", "Bachelor's Degree").
+    *   `major_subject` (String): Major subject of their highest degree (e.g., "Translation and Interpreting", "Linguistics").
+    *   `english_proficiency_score` (String/Float): Score from a recognized English proficiency test (e.g., "8.0" for IELTS, "110" for TOEFL). Use "N/A (Native Speaker)" if English is native. The system prompt logic for simulating non-native traits currently assumes an IELTS-like 0-9 scale if a float is provided.
+    *   `has_translation_certification` (String: "Yes"/"No"): Indicates if the translator holds any professional translation certifications.
+    *   `translation_experience_years_raw` (Float/Integer): Raw number of years in the translation field.
+    *   `employment_type` (String): Current or typical employment status (e.g., "Freelance", "In-house Translator (Tech Company)", "Part-time Academic Translator"). Used to calculate adjusted experience. Keywords like "full-time", "part-time", "freelance" influence the calculation.
+    *   `sample_source_text_ch` (String): A sample Chinese source text translated by the persona. (Can be placeholder like "[Chinese Source Sample for P001]" if actual text is not available for input).
+    *   `sample_translation_en` (String): The corresponding English translation of the sample source, done by the persona. (Can be placeholder like "[English Translation Sample for P001]").
+*   **Optional Columns:**
+    *   `gender` (String): Gender identity (e.g., "Male", "Female", "Non-binary"). (Optional, but can add to persona richness if used in prompts).
+    *   `common_linguistic_traits` (String): Description of typical linguistic habits, style, or common errors if applicable (e.g., "Prefers literal translations", "Tends to use complex sentence structures", "Occasional article omission").
+    *   `cat_tool_familiarity` (String): Comma-separated list of CAT (Computer-Assisted Translation) tools the persona is familiar with (e.g., "Trados Studio, memoQ", "OmegaT, Wordfast Classic", "None").
+*   **Calculated Fields (added by `persona_loader.py`):**
+    *   `translation_experience_years_adjusted` (Float): Experience years adjusted based on employment type (e.g., part-time might be 0.5x).
+    *   `translation_skill_level` (String): Categorized skill level (e.g., "Junior", "Mid-level (Certified)", "Senior") based on adjusted experience and certification.
+*   **Encoding:** Ensure this file is saved with UTF-8 encoding, especially if using non-ASCII characters.
+*   **Example Row (subset of columns):**
+    ```csv
+    persona_id,persona_name,native_language,english_proficiency_score,has_translation_certification,translation_experience_years_raw,employment_type,common_linguistic_traits
+    P001,Zhang Wei,Chinese,8.0,Yes,5,Freelance,"Specializes in technical and legal documents; prefers literal translations."
+    ```
+
+### Task Data (`data/mtpe_tasks.jsonl`)
+
+A JSON Lines (JSONL) file where each line is a JSON object representing an MTPE task.
+*   **Required Fields:**
+    *   `task_id` (String): Unique identifier for the task (e.g., "MTPE_TECH_001").
+    *   `source_text_ch` (String): The original Chinese source text.
+    *   `machine_translation_en` (String): The English machine translation that needs post-editing.
+*   **Optional Fields:**
+    *   `domain` (String): Subject domain of the text (e.g., "Technical Marketing", "News", "Legal").
+    *   `difficulty_level` (Integer): A numerical indicator of task difficulty (e.g., 1-5).
+*   **Example (single line from JSONL):**
+    ```json
+    {"task_id": "MTPE_TECH_001", "source_text_ch": "我们的新一代处理器采用了先进的7纳米制造工艺，显著提升了性能并降低了功耗。", "machine_translation_en": "Our new generation processor uses advanced 7nm manufacturing process, significantly improving performance and reducing power consumption.", "domain": "Technical Marketing", "difficulty_level": 3}
+    ```
+
+### Output Data (from `generated_translator_mtpe_results_YYYYMMDD_HHMMSS.jsonl`)
+
+The script `main_translator_mtpe.py` generates a JSONL file. Each line is a JSON object containing the results for one persona-task combination. The LLM is instructed to return a specific JSON structure, which is then included in this output.
+
+*   **Key Output Fields per Record:**
+    *   `persona_id`, `persona_name`: Identifier and name of the translator persona.
+    *   `task_id`, `source_text_ch`, `machine_translation_en`, `domain`, `difficulty_level`: Details from the input MTPE task.
+    *   `llm_provider`, `llm_model`: Information about the LLM used.
+    *   `system_prompt_hash`: A hash of the system prompt used (to save space; full prompt logged separately).
+    *   `generation_timestamp_utc`, `generation_time_seconds`: Metadata about the generation.
+    *   `generation_error`: Any error message if the LLM call or JSON parsing failed. `null` on success.
+    *   `llm_response_raw_text`: The raw string output from the LLM.
+    *   **Parsed LLM Output (if successful, these fields come from the LLM's JSON response):**
+        *   `mtpe_output_en` (String): The final post-edited English translation.
+        *   `think_aloud_protocol` (String): The detailed think-aloud protocol from the LLM.
+        *   `estimated_time_minutes` (Integer): Estimated post-editing time.
+        *   `perceived_mt_quality_rating` (Integer, 1-5): Persona's rating of the original MT.
+        *   `confidence_rating_of_mtpe_output` (Integer, 1-5): Persona's confidence in their MTPE.
+        *   `simulated_edit_categories` (List of Strings): Main categories of edits made.
+        *   `linguistic_error_simulation_notes` (String): Notes on any simulated linguistic errors.
+
+### Usage Instructions
+
+The main script for generating translator MTPE agent responses is `scripts/main_translator_mtpe.py`.
+
+1.  **Prepare Data:**
+    *   Ensure `data/personas_translator.csv` is populated with translator personas.
+    *   Ensure `data/mtpe_tasks.jsonl` contains the MTPE tasks.
+2.  **Configure `.env`:** Set up API keys if using commercial LLMs.
+3.  **Run the script:**
+    Navigate to the project root directory (`teacher_agent_generator`) and run:
+    ```bash
+    python scripts/main_translator_mtpe.py [OPTIONS]
+    ```
+4.  **Key Command-Line Arguments:**
+    *   `--translator_personas_file`: Path to the translator personas CSV file (default: `data/personas_translator.csv`).
+    *   `--mtpe_tasks_file`: Path to the MTPE tasks JSONL file (default: `data/mtpe_tasks.jsonl`).
+    *   `--output_dir`: Directory to save results (default: `outputs/generated_agents/`).
+    *   `--provider`, `--model_name`, `--temperature`, `--max_tokens`: LLM settings.
+    *   `--limit_personas`: Process only the first N personas.
+    *   `--limit_tasks`: For each persona, process only the first N tasks.
+    *   `--log_level`: Set logging verbosity.
+
+5.  **Example Command:**
+    ```bash
+    python scripts/main_translator_mtpe.py --provider ollama --model_name llama3:8b-instruct --limit_personas 1 --limit_tasks 2
+    ```
+    *(This example would run the first persona against the first two MTPE tasks using Ollama's `llama3:8b-instruct` model.)*
+
+### Prompt Engineering for Translators
+
+*   The `construct_translator_system_prompt` function in `scripts/main_generator.py` (imported by `main_translator_mtpe.py`) is key to guiding the LLM.
+*   It uses all available fields from `personas_translator.csv`, including calculated experience/skill and proficiency details, to create a detailed context for the LLM.
+*   The prompt explicitly instructs the LLM on the MTPE task, the Think Aloud Protocol, and the required JSON output structure.
+*   Experiment with persona attributes (especially `common_linguistic_traits`, `english_proficiency_score`, and sample texts if not placeholders) to achieve desired simulation nuances.
+*   The quality of the `sample_source_text_ch` and `sample_translation_en` (if provided as actual text rather than placeholders) can significantly influence the LLM's stylistic consistency, though the current prompt only generally refers to it.
+
+---

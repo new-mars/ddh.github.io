@@ -136,6 +136,119 @@ def construct_system_prompt(persona: dict) -> str:
 
     return "\n".join(prompt_parts)
 
+def construct_translator_system_prompt(persona: dict) -> str:
+    """
+    Constructs a detailed system prompt for a Translator Persona for MTPE tasks.
+    """
+    prompt_parts = []
+
+    # Core Identity
+    name = str(persona.get('persona_name', 'a professional translator')).strip()
+    native_lang = str(persona.get('native_language', 'not specified')).strip()
+    education = str(persona.get('education_level', 'not specified')).strip()
+    major = str(persona.get('major_subject', 'not specified')).strip()
+
+    prompt_parts.append(f"You are {name}, a professional translator.")
+    prompt_parts.append(f"Your native language is {native_lang}.")
+    if education.lower() != 'not specified':
+        prompt_parts.append(f"You hold a {education} in {major}.")
+
+    # Experience and Skills
+    adj_exp = persona.get('translation_experience_years_adjusted', 0.0)
+    skill_level = str(persona.get('translation_skill_level', 'Junior')).strip() # Default to Junior
+    cat_tools_raw = persona.get('cat_tool_familiarity')
+    cat_tools = str(cat_tools_raw).strip() if cat_tools_raw and not (isinstance(cat_tools_raw, float) and pd.isna(cat_tools_raw)) else "not specified"
+
+    prompt_parts.append(f"You have {adj_exp:.1f} years of adjusted professional translation experience, and your skill level is considered {skill_level}.")
+    if cat_tools.lower() != 'not specified':
+        prompt_parts.append(f"You are familiar with CAT tools such as: {cat_tools}.")
+    else:
+        prompt_parts.append("You may or may not be familiar with specific CAT tools.")
+
+    # English Proficiency & Linguistic Style Simulation (if Chinese native speaker translating to English)
+    # This section needs to be adapted if the translation direction changes.
+    # Current assumption: CH -> EN translation task.
+    eng_prof_score_raw = persona.get('english_proficiency_score')
+    eng_prof_score = None
+    is_native_english = native_lang.lower().startswith('english')
+
+    if not is_native_english:
+        try:
+            eng_prof_score = float(eng_prof_score_raw) # Assuming score is out of 100 for this logic
+            # Example: IELTS scores are 0-9. TOEFL 0-120. Let's assume a generic 0-100 scale for this example.
+            # This part MUST be adapted based on the actual scale of 'english_proficiency_score'.
+            # For this example, let's imagine it's a percentile or a score where <85 and <100 are meaningful.
+            # This logic is highly dependent on the specific meaning of 'english_proficiency_score'.
+            # IF THE SCORE IS IELTS (0-9), then thresholds need to be e.g. <7.0, <8.0 etc.
+            # The sample data has scores like 7.5, 8.0 - these look like IELTS. Let's use that.
+            # IELTS 7.0 (Competent), 8.0 (Very Good), 9.0 (Expert)
+
+            # Let's adjust for IELTS-like scores (0-9 scale)
+            if eng_prof_score < 7.0: # e.g., below "Competent User"
+                 prompt_parts.append("Your English proficiency is good, but not native. You might occasionally make minor grammatical errors or choose slightly unnatural phrasing typical of a non-native speaker at your proficiency level (e.g., issues with articles, prepositions, or complex sentence structures). Please subtly reflect this in your post-edited output if appropriate for realism, but prioritize clarity and accuracy.")
+            elif eng_prof_score < 8.0: # e.g., "Good User" up to "Very Good User"
+                 prompt_parts.append("Your English proficiency is very good. While generally accurate and fluent, your phrasing might sometimes lack full idiomatic naturalness compared to a native speaker. Aim for high-quality, natural-sounding English, but slight non-native patterns are acceptable if they occur organically.")
+            else: # 8.0 and above
+                 prompt_parts.append("Your English proficiency is excellent, near-native or native-like. Your post-edited output should reflect a high command of English, with natural and idiomatic phrasing.")
+
+        except (ValueError, TypeError):
+            if eng_prof_score_raw and str(eng_prof_score_raw).strip().lower() not in ['n/a', 'na', 'native', 'n/a (native speaker)']:
+                prompt_parts.append(f"Your English proficiency score is '{eng_prof_score_raw}'. Interpret this score appropriately to reflect language quality in your output.")
+            elif not eng_prof_score_raw:
+                 prompt_parts.append("Your English proficiency is not specified. Assume a professional working proficiency.")
+    else: # Native English speaker
+        prompt_parts.append("You are a native English speaker. Your English output should be of native quality, fluent, and idiomatic.")
+
+    # Linguistic Traits and Style
+    common_traits_raw = persona.get('common_linguistic_traits')
+    common_traits = str(common_traits_raw).strip() if common_traits_raw and not (isinstance(common_traits_raw, float) and pd.isna(common_traits_raw)) else ""
+    if common_traits:
+        prompt_parts.append(f"Your known linguistic traits include: {common_traits}.")
+
+    sample_source_exists = persona.get('sample_source_text_ch') and not (isinstance(persona.get('sample_source_text_ch'), float) and pd.isna(persona.get('sample_source_text_ch'))) and "[Chinese Source Sample" not in str(persona.get('sample_source_text_ch'))
+    sample_translation_exists = persona.get('sample_translation_en') and not (isinstance(persona.get('sample_translation_en'), float) and pd.isna(persona.get('sample_translation_en'))) and "[English Translation Sample" not in str(persona.get('sample_translation_en'))
+
+    if sample_source_exists and sample_translation_exists:
+        prompt_parts.append("Strive for consistency with the style demonstrated in your provided sample translation (details of which are not directly shown here but assume you know your style).")
+    else:
+        prompt_parts.append("Translate and post-edit according to your described linguistic traits and professional standards.")
+
+    # MTPE Task Instructions
+    prompt_parts.append("\n--- MTPE Task Instructions ---")
+    prompt_parts.append("You will be given a Chinese source text and its corresponding English machine translation (MT). Your task is to:")
+    prompt_parts.append("1.  **Post-edit** the English machine translation to produce a high-quality, accurate, fluent, and natural-sounding English translation that reflects your persona's skill level and linguistic style. The post-edited text should be ready for publication or use in a professional context, correcting all errors in the MT.")
+    prompt_parts.append("2.  **Produce a Think Aloud Protocol (TAP)**: While you perform the post-editing, verbalize your thought process. This should include identifying issues in the MT, explaining your correction strategies, and noting any challenges or interesting linguistic points. Be detailed and specific.")
+    prompt_parts.append("3.  **Estimate Post-Editing Time**: Provide an estimated time in minutes that it would take you to complete the post-editing for this segment.")
+    prompt_parts.append("4.  **Rate Perceived MT Quality**: On a scale of 1 (Very Poor) to 5 (Very Good), rate the quality of the original machine translation *before* your edits.")
+    prompt_parts.append("5.  **Rate Confidence in MTPE Output**: On a scale of 1 (Not Confident) to 5 (Very Confident), rate your confidence in the quality and accuracy of *your own* final post-edited translation.")
+    prompt_parts.append("6.  **Identify Simulated Edit Categories**: List up to three primary categories of edits you made (e.g., 'Grammar', 'Terminology', 'Style', 'Fluency', 'Mistranslation', 'Omission', 'Addition').")
+    prompt_parts.append("7.  **Linguistic Error Simulation Notes** (If applicable based on your English proficiency): Briefly note if you intentionally introduced or retained any minor non-native patterns as per your persona's proficiency level. If native or high proficiency, this might be 'N/A'.")
+
+    # Output Format Requirement
+    prompt_parts.append("\n--- Output Format Requirement ---")
+    prompt_parts.append("Your entire response MUST be a single, valid JSON object string. Do NOT include any text outside of this JSON object. The JSON object must have the following fields:")
+    prompt_parts.append("- `mtpe_output_en` (string): Your final post-edited English translation.")
+    prompt_parts.append("- `think_aloud_protocol` (string): Your detailed think-aloud protocol.")
+    prompt_parts.append("- `estimated_time_minutes` (integer): Your time estimate in minutes.")
+    prompt_parts.append("- `perceived_mt_quality_rating` (integer, 1-5): Your rating of the original MT quality.")
+    prompt_parts.append("- `confidence_rating_of_mtpe_output` (integer, 1-5): Your confidence in your MTPE output.")
+    prompt_parts.append("- `simulated_edit_categories` (list of strings): Up to three main edit categories.")
+    prompt_parts.append("- `linguistic_error_simulation_notes` (string): Notes on any simulated linguistic errors, or 'N/A'.")
+    prompt_parts.append("\nExample of the required JSON output structure string (DO NOT include markdown backticks in your actual response):")
+    prompt_parts.append("```json")
+    prompt_parts.append("{")
+    prompt_parts.append("  \"mtpe_output_en\": \"This is the final, high-quality English translation after post-editing...\",")
+    prompt_parts.append("  \"think_aloud_protocol\": \"First, I noticed the term '...' was mistranslated in the MT as '...'. I corrected it to '...'. Then, the sentence structure '...' was awkward, so I rephrased it to '...'. I also corrected a grammatical error related to subject-verb agreement...\",")
+    prompt_parts.append("  \"estimated_time_minutes\": 15,")
+    prompt_parts.append("  \"perceived_mt_quality_rating\": 3,")
+    prompt_parts.append("  \"confidence_rating_of_mtpe_output\": 5,")
+    prompt_parts.append("  \"simulated_edit_categories\": [\"Terminology\", \"Fluency\", \"Grammar\"],")
+    prompt_parts.append("  \"linguistic_error_simulation_notes\": \"As a non-native speaker with a score of 7.5, I allowed a minor prepositional choice that might not be the most common but is understandable, to reflect subtle non-native patterns.\"`")
+    prompt_parts.append("}")
+    prompt_parts.append("```")
+
+    return "\n\n".join(prompt_parts) # Use double newline for better readability of the final prompt
+
 def main():
     args = setup_arg_parser()
 

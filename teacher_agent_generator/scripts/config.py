@@ -23,6 +23,8 @@ OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
 PERSONAS_FILE = os.path.join(DATA_DIR, "personas.csv")
 QUESTIONS_FILE = os.path.join(DATA_DIR, "questions.txt")
 QUESTIONNAIRE_FILE = os.path.join(DATA_DIR, "questionnaire.json")
+DEFAULT_TRANSLATOR_PERSONAS_CSV_PATH = os.path.join(DATA_DIR, "personas_translator.csv") # New path for translator personas
+DEFAULT_MTPE_TASKS_PATH = os.path.join(DATA_DIR, "mtpe_tasks.jsonl") # Path for MTPE tasks
 
 GENERATED_AGENTS_DIR = os.path.join(OUTPUT_DIR, "generated_agents")
 LOG_FILE = os.path.join(OUTPUT_DIR, "generation.log")

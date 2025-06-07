@@ -19,8 +19,14 @@ logging.basicConfig(level=config.LOG_LEVEL.upper() if hasattr(config, 'LOG_LEVEL
                     filename=config.LOG_FILE if hasattr(config, 'LOG_FILE') else None,
                     filemode='a')
 
+# Define required fields for MTPE tasks for basic validation
+MTPE_TASK_REQUIRED_FIELDS = ["task_id", "source_text_ch", "machine_translation_en"]
+
 def _load_open_ended_questions(file_path=config.QUESTIONS_FILE):
     """Loads open-ended questions from a text file."""
+    if not file_path: # Handle None path
+        logging.info("Open-ended questions path not provided. Skipping loading.")
+        return []
     questions = []
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -39,6 +45,9 @@ def _load_open_ended_questions(file_path=config.QUESTIONS_FILE):
 
 def _load_questionnaire_items(file_path=config.QUESTIONNAIRE_FILE):
     """Loads questionnaire items from a JSON file."""
+    if not file_path: # Handle None path
+        logging.info("Questionnaire file path not provided. Skipping loading.")
+        return []
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             items = json.load(f)
@@ -65,112 +74,184 @@ def _load_questionnaire_items(file_path=config.QUESTIONNAIRE_FILE):
         logging.error(f"Error loading questionnaire items from {file_path}: {e}")
         return []
 
-def load_all_tasks(questions_path=config.QUESTIONS_FILE, questionnaire_path=config.QUESTIONNAIRE_FILE):
+def _load_mtpe_tasks(file_path: str) -> list[dict]:
+    """Loads MTPE tasks from a JSONL file."""
+    if not file_path or not os.path.exists(file_path):
+        logging.info(f"MTPE tasks file not found or path not configured: {file_path}. Skipping MTPE task loading.")
+        return []
+
+    mtpe_tasks = []
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            for line_num, line in enumerate(f):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    task = json.loads(line)
+                    # Validate required fields
+                    missing_fields = [field for field in MTPE_TASK_REQUIRED_FIELDS if field not in task or not task[field]]
+                    if missing_fields:
+                        logging.warning(f"MTPE task on line {line_num+1} in {file_path} is missing required fields: {', '.join(missing_fields)}. Skipping task.")
+                        continue
+
+                    # Add a type field for consistency if desired, or handle in main_generator
+                    task["type"] = "mtpe_task"
+                    mtpe_tasks.append(task)
+                except json.JSONDecodeError:
+                    logging.error(f"Error decoding JSON from MTPE task file {file_path} on line {line_num+1}. Skipping line.")
+                    continue
+        logging.info(f"Successfully loaded {len(mtpe_tasks)} MTPE tasks from {file_path}.")
+        return mtpe_tasks
+    except FileNotFoundError: # Should be caught by os.path.exists, but as a safeguard
+        logging.error(f"MTPE tasks file not found: {file_path}")
+        return []
+    except Exception as e:
+        logging.error(f"Error loading MTPE tasks from {file_path}: {e}", exc_info=True)
+        return []
+
+def load_all_tasks(questions_path=config.QUESTIONS_FILE,
+                   questionnaire_path=config.QUESTIONNAIRE_FILE,
+                   mtpe_tasks_path=None): # Default to None, will be set by config if not passed
     """
-    Loads all tasks (open-ended questions and questionnaire items).
+    Loads all tasks (open-ended questions, questionnaire items, and MTPE tasks).
 
     Args:
         questions_path (str): Path to the open-ended questions file.
         questionnaire_path (str): Path to the questionnaire JSON file.
+        mtpe_tasks_path (str, optional): Path to the MTPE tasks JSONL file.
+                                         Defaults to config.DEFAULT_MTPE_TASKS_PATH if None.
 
     Returns:
-        dict: A dictionary with keys 'open_ended_questions' and 'questionnaire_items',
-              containing lists of tasks. Returns empty lists if loading fails.
+        dict: A dictionary with keys 'open_ended_questions', 'questionnaire_items',
+              and 'mtpe_tasks', containing lists of tasks.
+              Returns empty lists for specific task types if loading fails or path is not set.
     """
-    logging.info(f"Loading all tasks from questions_path: {questions_path} and questionnaire_path: {questionnaire_path}")
+    if mtpe_tasks_path is None:
+        mtpe_tasks_path = config.DEFAULT_MTPE_TASKS_PATH if hasattr(config, 'DEFAULT_MTPE_TASKS_PATH') else None
+
+    logging.info(f"Loading tasks: Questions from '{questions_path}', Questionnaire from '{questionnaire_path}', MTPE from '{mtpe_tasks_path}'")
+
     open_ended = _load_open_ended_questions(questions_path)
     questionnaire = _load_questionnaire_items(questionnaire_path)
+    mtpe_tasks = _load_mtpe_tasks(mtpe_tasks_path)
 
     return {
         "open_ended_questions": open_ended,
-        "questionnaire_items": questionnaire
+        "questionnaire_items": questionnaire,
+        "mtpe_tasks": mtpe_tasks
     }
 
 if __name__ == '__main__':
-    print("Task Loader Module - Test Run")
-    logging.info("Task Loader Module - Test Run Started")
+    # Ensure logging is configured for standalone testing of this module
+    if not logging.getLogger().hasHandlers():
+        logging.basicConfig(level=config.LOG_LEVEL.upper() if hasattr(config, 'LOG_LEVEL') else logging.INFO,
+                            format='%(asctime)s - %(levelname)s - %(module)s - %(message)s')
+    logger = logging.getLogger(__name__) # Get a logger for this module specifically for __main__
+    logger.info("--- Task Loader Self-Test Started ---")
 
-    # For testing, ensure dummy files exist or create them if they don't.
-    # This makes the test self-contained.
+    # Ensure DATA_DIR exists (it should via config.py, but double check)
+    try:
+        if not os.path.exists(config.DATA_DIR):
+            os.makedirs(config.DATA_DIR)
+            logger.info(f"Created data directory for tests: {config.DATA_DIR}")
 
-    # Ensure DATA_DIR exists (it should via config.py, but double check for standalone test)
-    if not os.path.exists(config.DATA_DIR):
-        os.makedirs(config.DATA_DIR)
-        print(f"Created data directory for tests: {config.DATA_DIR}")
+        # --- Setup for questions.txt and questionnaire.json tests ---
+        default_questions_content = [
+            "What is your primary motivation for teaching?",
+            "Describe a challenging teaching situation and how you handled it."
+        ]
+        default_questionnaire_content = [
+            {"id": "q1", "type": "multiple_choice", "text": "Which age group do you prefer teaching?", "options": ["K-5", "6-8", "9-12", "Adults"]},
+            {"id": "q2", "type": "likert_scale", "text": "Rate your comfort with using technology in the classroom (1=Low, 5=High)."},
+            {"id": "q3", "type": "short_answer", "text": "What are your strengths as an educator?"}
+        ]
 
-    # Default content for questions.txt
-    default_questions_content = [
-        "What is your primary motivation for teaching?",
-        "Describe a challenging teaching situation and how you handled it."
-    ]
-    # Default content for questionnaire.json
-    default_questionnaire_content = [
-        {"id": "q1", "type": "multiple_choice", "text": "Which age group do you prefer teaching?", "options": ["K-5", "6-8", "9-12", "Adults"]},
-        {"id": "q2", "type": "likert_scale", "text": "Rate your comfort with using technology in the classroom (1=Low, 5=High)."},
-        {"id": "q3", "type": "short_answer", "text": "What are your strengths as an educator?"}
-    ]
+        # Use specific test file paths to avoid interfering with actual data files if they exist
+        test_questions_file = os.path.join(config.DATA_DIR, "test_questions.txt")
+        test_questionnaire_file = os.path.join(config.DATA_DIR, "test_questionnaire.json")
+        test_mtpe_tasks_file = os.path.join(config.DATA_DIR, "test_mtpe_tasks.jsonl")
 
-    # Check and create/overwrite questions.txt for testing
-    if not os.path.exists(config.QUESTIONS_FILE) or os.path.getsize(config.QUESTIONS_FILE) == 0:
-        print(f"Creating/Overwriting dummy '{config.QUESTIONS_FILE}' for testing.")
-        with open(config.QUESTIONS_FILE, 'w', encoding='utf-8') as f:
+        # Create/Overwrite questions.txt for testing
+        logger.info(f"Setting up '{test_questions_file}' for testing.")
+        with open(test_questions_file, 'w', encoding='utf-8') as f:
             for q_text in default_questions_content:
                 f.write(q_text + "\n")
-    else:
-        print(f"Using existing '{config.QUESTIONS_FILE}' for testing.")
 
-
-    # Check and create/overwrite questionnaire.json for testing
-    # The original questionnaire.json was created with just `[]`.
-    # The test here will overwrite it with more comprehensive test data if it's still empty.
-    needs_overwrite_questionnaire = False
-    if not os.path.exists(config.QUESTIONNAIRE_FILE):
-        needs_overwrite_questionnaire = True
-    else:
-        try:
-            with open(config.QUESTIONNAIRE_FILE, 'r', encoding='utf-8') as f_check:
-                content = json.load(f_check)
-                if not content: # If it's an empty list or empty file
-                    needs_overwrite_questionnaire = True
-        except (json.JSONDecodeError, FileNotFoundError): # File exists but malformed or truly empty
-             needs_overwrite_questionnaire = True
-        except Exception: # Any other read error
-            needs_overwrite_questionnaire = True
-
-
-    if needs_overwrite_questionnaire:
-        print(f"Creating/Overwriting dummy '{config.QUESTIONNAIRE_FILE}' for testing.")
-        with open(config.QUESTIONNAIRE_FILE, 'w', encoding='utf-8') as f:
+        # Create/Overwrite questionnaire.json for testing
+        logger.info(f"Setting up '{test_questionnaire_file}' for testing.")
+        with open(test_questionnaire_file, 'w', encoding='utf-8') as f:
             json.dump(default_questionnaire_content, f, indent=2)
-    else:
-        print(f"Using existing '{config.QUESTIONNAIRE_FILE}' for testing (assuming it has content).")
 
-    print("\n--- Loading all tasks ---")
-    all_tasks = load_all_tasks()
+        # --- Setup for mtpe_tasks.jsonl test ---
+        default_mtpe_tasks_content = [
+            {"task_id": "MTPE_TEST_001", "source_text_ch": "测试源文本。", "machine_translation_en": "Test source text.", "domain": "General", "difficulty_level": 1},
+            {"task_id": "MTPE_TEST_002", "source_text_ch": "另一个测试。", "machine_translation_en": "Another test.", "domain": "General", "difficulty_level": 1}
+        ]
+        logger.info(f"Setting up '{test_mtpe_tasks_file}' for testing.")
+        with open(test_mtpe_tasks_file, 'w', encoding='utf-8') as f:
+            for task_item in default_mtpe_tasks_content:
+                f.write(json.dumps(task_item) + '\n')
 
-    if all_tasks["open_ended_questions"]:
-        print(f"\nSuccessfully loaded {len(all_tasks['open_ended_questions'])} open-ended questions:")
-        for i, task in enumerate(all_tasks['open_ended_questions']):
-            print(f"  {i+1}. Type: {task['type']}, Text: {task['text'][:50]}...")
-    else:
-        print("\nNo open-ended questions loaded or an error occurred. Check logs.")
+        logger.info("\n--- Testing specific loader functions ---")
+        loaded_open_ended = _load_open_ended_questions(test_questions_file)
+        logger.info(f"Loaded {len(loaded_open_ended)} open-ended questions directly.")
 
-    if all_tasks["questionnaire_items"]:
-        print(f"\nSuccessfully loaded {len(all_tasks['questionnaire_items'])} questionnaire items:")
-        for i, task in enumerate(all_tasks['questionnaire_items']):
-            print(f"  {i+1}. ID: {task['id']}, Type: {task['type']}, Text: {task['text'][:50]}...")
-    else:
-        print("\nNo questionnaire items loaded or an error occurred. Check logs.")
+        loaded_questionnaire = _load_questionnaire_items(test_questionnaire_file)
+        logger.info(f"Loaded {len(loaded_questionnaire)} questionnaire items directly.")
 
-    print("\n--- Testing with non-existent files ---")
-    non_existent_tasks = load_all_tasks(
-        questions_path=os.path.join(config.DATA_DIR, "non_existent_questions.txt"),
-        questionnaire_path=os.path.join(config.DATA_DIR, "non_existent_questionnaire.json")
-    )
-    if not non_existent_tasks["open_ended_questions"] and not non_existent_tasks["questionnaire_items"]:
-        print("Correctly handled non-existent task files (returned empty lists).")
-    else:
-        print("ERROR: Did not correctly handle non-existent task files.")
+        loaded_mtpe = _load_mtpe_tasks(test_mtpe_tasks_file)
+        logger.info(f"Loaded {len(loaded_mtpe)} MTPE tasks directly.")
+        if loaded_mtpe:
+            logger.info(f"  Example MTPE Task ID: {loaded_mtpe[0].get('task_id')}, Domain: {loaded_mtpe[0].get('domain')}")
 
-    print("\nTask Loader Module - Test Run Finished")
-    logging.info("Task Loader Module - Test Run Finished")
+        logger.info("\n--- Testing load_all_tasks with test files ---")
+        all_tasks = load_all_tasks(
+            questions_path=test_questions_file,
+            questionnaire_path=test_questionnaire_file,
+            mtpe_tasks_path=test_mtpe_tasks_file
+        )
+
+        logger.info(f"Total open-ended questions loaded via load_all_tasks: {len(all_tasks['open_ended_questions'])}")
+        logger.info(f"Total questionnaire items loaded via load_all_tasks: {len(all_tasks['questionnaire_items'])}")
+        logger.info(f"Total MTPE tasks loaded via load_all_tasks: {len(all_tasks['mtpe_tasks'])}")
+        if all_tasks['mtpe_tasks']:
+            logger.info(f"  Example MTPE Task from load_all_tasks: {all_tasks['mtpe_tasks'][0].get('task_id')}")
+
+        logger.info("\n--- Testing load_all_tasks with default (production) paths ---")
+        # This will use the actual data files if they exist, or log errors if not
+        all_tasks_default = load_all_tasks()
+        logger.info(f"Default open-ended questions: {len(all_tasks_default['open_ended_questions'])}")
+        logger.info(f"Default questionnaire items: {len(all_tasks_default['questionnaire_items'])}")
+        logger.info(f"Default MTPE tasks: {len(all_tasks_default['mtpe_tasks'])}")
+        if all_tasks_default['mtpe_tasks']:
+             logger.info(f"  Example default MTPE Task ID: {all_tasks_default['mtpe_tasks'][0].get('task_id')}")
+        else:
+            logger.info("No default MTPE tasks loaded (file might be empty or not found as per config).")
+
+
+        logger.info("\n--- Testing with non-existent files for all types via load_all_tasks ---")
+        non_existent_q = os.path.join(config.DATA_DIR, "non_existent_q.txt")
+        non_existent_qn = os.path.join(config.DATA_DIR, "non_existent_qn.json")
+        non_existent_mtpe = os.path.join(config.DATA_DIR, "non_existent_mtpe.jsonl")
+
+        ne_tasks = load_all_tasks(
+            questions_path=non_existent_q,
+            questionnaire_path=non_existent_qn,
+            mtpe_tasks_path=non_existent_mtpe
+        )
+        if not ne_tasks["open_ended_questions"] and \
+           not ne_tasks["questionnaire_items"] and \
+           not ne_tasks["mtpe_tasks"]:
+            logger.info("Correctly handled all non-existent task files (returned empty lists for all types).")
+        else:
+            logger.error("ERROR: Did not correctly handle all non-existent task files.")
+
+    finally:
+        # Clean up test files
+        if os.path.exists(test_questions_file): os.remove(test_questions_file)
+        if os.path.exists(test_questionnaire_file): os.remove(test_questionnaire_file)
+        if os.path.exists(test_mtpe_tasks_file): os.remove(test_mtpe_tasks_file)
+        logger.info("Cleaned up test files.")
+
+    logger.info("--- Task Loader Self-Test Finished ---")
